@@ -1,0 +1,345 @@
+---
+title: "US Retail Sales Dashboard"
+author: "Elizabeth Van Der Schaaf"
+date: "2025-02-23"
+output: html_document
+---
+
+### Background
+
+The data for this dashboard was taken from the Monthly Trade Report complied by the US Census (US Census Bureau, 2025). It contains retail sales data going back to 1992 broken down by many different categories. I chose this data because I thought it would yield some interesting insights into American spending, especially around the role of e-commerce and the COVID pandemic.
+
+I want to tell the story of what Americans are spending their money on, the impact of the pandemic, and how spending patterns have changed over the years. I can use the detailed sales data broken down by month, year, and category to draw out trends or patterns in spending. My intended audience is anyone in the retail sector, but especially those interested in trends associated with e-commerce. These may be people considering a shift from physical retail or expanding their operations.
+
+This audience is interested in any major shifts in e-commerce and physical retail. They also would want to know which retail categories Americans tend to spend more on and any current trends. They may already have a general idea of some trends but may not have taken a closer look at the numbers. They may also not be aware of sales figures for certain retail categories and how these compare to overall retail spending.
+
+The big idea of my dashboard is that e-commerce took off during the pandemic and shows no signs of slowing down while other sectors show different behavior, notably the food service sector which showed a major decline but is now recovering.
+
+This dashboard contains a grouped bar chart showing performance of select categories as a percentage of total retail sales. The values can be filtered by year via a slider underneath. There is also a line chart showing sales over time for certain categories. A couple of annotations were added to enhance understanding of the data. There is also the capability to filter the data using a range selector. With these filters the user is able to drill down and explore the data more. A link to the data source is included at the bottom.
+
+### Reference
+US Census Bureau. (2025, February 14). *Monthly Retail Trade* - Sales report. https://www.census.gov/retail/sales.html
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(plotly)
+library(shiny)
+```
+
+```{r}
+df <- read_csv("us_retail.csv")
+df$date <- mdy(df$date)
+df <- arrange(df, date)
+
+select_cats <- c("e-shopping","department","grocery","clothing","food_service")
+eshopping <- filter(df, category == "e-shopping")
+department <- filter(df, category == "department")
+grocery <- filter(df, category == "grocery")
+clothing <- filter(df, category == "clothing")
+food_service <- filter(df, category == "food_service")
+cats <- list(department,grocery,clothing, food_service)
+
+# Filter data based on selected categories
+selected_categories <- c("e-shopping", "department", "grocery", "clothing", "food_service")
+filtered_data <- df |>
+  filter(category %in% selected_categories)
+
+# Group by category and year, and calculate total sales for each group
+sales_per_category_year <- filtered_data |>
+  group_by(category, year) |>
+  summarise(sales = sum(sales)) |>
+  ungroup()
+
+# Do the same for total retail sales
+retail_total_data <- df |>
+  filter(category == 'retail_total')
+
+retail_total_per_year <- retail_total_data |>
+  group_by(year) |>
+  summarise(sales = sum(sales)) |>
+  ungroup()
+
+color_map <- c("e-shopping" = "chocolate",
+               "department" = "cornflowerblue",
+               "grocery" = "lightsteelblue",
+               "clothing" = "mediumpurple",
+               "food_service" = "mediumturquoise")
+```
+
+
+```{r}
+# Define the UI for the app
+ui <- fluidPage(
+  
+    # Add custom CSS
+  tags$style(HTML("
+    .shiny-title {
+      background-color: #63635e;  
+      color: #faf9ed;             
+      padding: 15px;
+      border-radius: 4px;
+    }
+  ")),
+  
+  # Dashboard title
+   titlePanel(
+    div(class = "shiny-title", "US Retail Sales | The Impact of COVID 19")
+  ),
+  
+  # Display the dynamic bar chart
+  plotlyOutput("filtered_bars"),
+  
+  # Slider input for year selection
+  sliderInput("year_slider", 
+              label = "Filter bar chart by select year", 
+              min = 2015, max = 2024, value = 2020, 
+              step = 1,animate = TRUE, sep = ""),
+  
+  # Display line chart
+    div(
+    style = "padding-bottom: 5px;",
+    plotlyOutput("line_chart")
+  ),
+  
+    # Slider input for year range selection
+  div(
+    style = "padding-bottom: 50px;",
+    sliderInput("range_slider", label = "Filter line chart by desired range",
+              min = 2015, max = 2024, value = c(2018, 2021),
+              step = 1, animate = TRUE,ticks = TRUE, sep = "")
+  ),
+  
+  # External link to data source
+  tags$div(style = "position: fixed; bottom: 10px; width: 100%; text-align: left; padding: 10px; background-color: white;",
+           HTML('<a href="https://www.census.gov/retail/sales.html" target="_blank" style="font-size: 14px; color: #007bff; text-decoration: underline;">Click here for data source: Monthly Retail Trade Report</a>'))
+)
+
+  
+  # Define server logic
+server <- function(input, output) {
+  
+  output$filtered_bars <- renderPlotly({
+    
+    selected_year <- input$year_slider
+    
+    # Filter and process data
+    sales <- sales_per_category_year |> 
+      filter(year == selected_year)
+    
+    merged_data <- sales |>
+      left_join(retail_total_per_year, by = "year") |>
+      mutate(percentage_of_total = sales.x / sales.y) |>
+      arrange(desc(percentage_of_total))
+    
+    plot_ly() |>
+      add_trace(
+        type = 'bar',
+        x = merged_data$category,
+        y = merged_data$percentage_of_total,
+        name = 'Sales as Percentage of Total Retail Sales',
+        marker = list(color = color_map[merged_data$category]),
+        text = merged_data$category, 
+        textposition = 'outside',
+        hoverinfo = 'x+y'
+      ) |>
+      layout(
+        title = list(text = "Sales as a Percentage of Total Retail Sales",
+                     font = list(size = 22),
+                     x = 0.005, xanchor = 'left',
+                     y = 0.98),
+        xaxis = list(
+          title = selected_year,
+          titlefont = list(size = 16),
+          tickvals = NULL,
+          ticktext = NULL,
+          showline = FALSE,
+          linecolor = 'grey',
+          categoryorder = "array",
+          categoryarray = merged_data$category
+        ),
+        yaxis = list(
+          title = "Percent of Total Retail Sales",
+          tickformat = ".0%",
+          titlefont = list(size = 16),
+          tickfont = list(size = 12),
+          showgrid = FALSE,
+          showline = FALSE,
+          zeroline = FALSE,
+          linecolor = 'grey'
+        ),
+        showlegend = FALSE,
+        plot_bgcolor = 'white',
+        paper_bgcolor = 'white'
+      ) |>
+      config(displayModeBar = FALSE)
+  })
+  
+    # Reactive expression to filter data based on slider input
+  filtered_data <- reactive({
+    # Filter the data based on the selected range from the slider
+    eshopping_filtered <- filter(eshopping, year(date) >= input$range_slider[1] & year(date) <= input$range_slider[2])
+    department_filtered <- filter(department, year(date) >= input$range_slider[1] & year(date) <= input$range_slider[2])
+    grocery_filtered <- filter(grocery, year(date) >= input$range_slider[1] & year(date) <= input$range_slider[2])
+    clothing_filtered <- filter(clothing, year(date) >= input$range_slider[1] & year(date) <= input$range_slider[2])
+    foodservice_filtered <- filter(food_service, year(date) >= input$range_slider[1] & year(date) <= input$range_slider[2])
+    
+    list(eshopping_filtered, department_filtered, grocery_filtered, clothing_filtered, foodservice_filtered)
+  })
+    # Create the plot based on the filtered data
+  output$line_chart <- renderPlotly({
+    data <- filtered_data()
+    
+    # Start with the e-shopping category
+    line_chart <- plot_ly(data = data[[1]],
+                          x = ~date,
+                          y = ~sales,
+                          name = "e-shopping",
+                          type = 'scatter',
+                          mode = 'lines',
+                          line = list(color = color_map['e-shopping']))
+    
+    # Manually add "food_service" before the loop to ensure it's included
+line_chart <- add_trace(line_chart, data = data[[5]],
+                        x = ~date,
+                        y = ~sales,
+                        name = "food_service",
+                        type = 'scatter',
+                        mode = 'lines',
+                        line = list(color = color_map['food_service']))
+    
+    # Add the traces for the other categories
+    for (cat in data[2:length(data)]) {
+      line_chart <- add_trace(line_chart, data = cat,
+                              x = ~date,
+                              y = ~sales,
+                              name = unique(cat$category),
+                              type = 'scatter',
+                              mode = 'lines',
+                              line = list(color = color_map[unique(cat$category)]))
+    }
+    
+    # Dynamic annotations: Adjust the 'y' value based on the last sales value in the filtered data
+    eshop_ann <- list(
+      xref = 'paper',
+      yref = 'y',
+      x = 0.99,
+      y = data[[1]]$sales[nrow(data[[1]])] + 2000,  # Adjust to the last value in filtered data
+      xanchor = 'right',
+      yanchor = 'middle',
+      text = 'e-shopping',
+      font = list(family = 'Arial', size = 14, color = 'rgba(67,67,67,1)'),
+      showarrow = FALSE
+    )
+
+    dept_ann <- list(
+      xref = 'paper',
+      yref = 'y',
+      x = 0.99,
+      y = data[[2]]$sales[nrow(data[[2]])] + 2000,  # Adjust dynamically based on filtered data
+      xanchor = 'right',
+      yanchor = 'middle',
+      text = 'department',
+      font = list(family = 'Arial', size = 14, color = 'rgba(67,67,67,1)'),
+      showarrow = FALSE
+    )
+
+    groc_ann <- list(
+      xref = 'paper',
+      yref = 'y',
+      x = 0.99,
+      y = data[[3]]$sales[nrow(data[[3]])] + 2000,  # Adjust dynamically based on filtered data
+      xanchor = 'right',
+      yanchor = 'middle',
+      text = 'grocery',
+      font = list(family = 'Arial', size = 14, color = 'rgba(67,67,67,1)'),
+      showarrow = FALSE
+    )
+
+    cloth_ann <- list(
+      xref = 'paper',
+      yref = 'y',
+      x = 0.99,
+      y = data[[4]]$sales[nrow(data[[4]])] + 2000,  # Adjust dynamically based on filtered data
+      xanchor = 'right',
+      yanchor = 'middle',
+      text = 'clothing',
+      font = list(family = 'Arial', size = 14, color = 'rgba(67,67,67,1)'),
+      showarrow = FALSE
+    )
+    
+    fservice_ann <- list(
+      xref = 'paper',
+      yref = 'y',
+      x = 0.99,
+      y = data[[5]]$sales[nrow(data[[5]])] + 2000,
+      xanchor = 'right',
+      yanchor = 'middle',
+      text = 'food service',
+      font = list(family = 'Arial', size = 14, color = 'rgba(67,67,67,1)'),
+      showarrow = FALSE
+    )
+    
+    # Determine if 2020 is in the selected range
+    is_2020_in_range <- 2020 >= input$range_slider[1] & 2020 <= input$range_slider[2]
+    
+      fservice2020_ann <- if (is_2020_in_range) {
+        list(
+          xref = 'x',
+          yref = 'y',
+          x = '2020-04-01',
+          y = 31394,
+          xanchor = 'left',
+          yanchor = 'middle',
+          text = '    From February to April<br>    food service sales declined dramatically',
+          font = list(family = 'Arial', size = 12, color = 'rgba(67,67,67,1)'),
+          showarrow = FALSE,
+          align = 'left'
+       )
+      } else {
+        NULL
+      }
+      
+        eshopping2020_ann <- if (is_2020_in_range) {
+        list(
+          xref = 'x',
+          yref = 'y',
+          x = '2020-05-01',
+          y = 78235,
+          xanchor = 'right',
+          yanchor = 'middle',
+          text = 'E-commerce soared<br>between February and May    ',
+          font = list(family = 'Arial', size = 12, color = 'rgba(67,67,67,1)'),
+          showarrow = FALSE,
+          align = 'left'
+       )
+      } else {
+        NULL
+      }
+    
+    # Layout for the plot
+    line_chart <- line_chart |> 
+      layout(
+        title = list(text = "Retail Sales Over Time: The Rise of E-commerce",
+                     font = list(size = 22),
+                     x = 0.005, xanchor = 'left',
+                     y = 0.98),
+        xaxis = list(title = "", showgrid = FALSE),
+        yaxis = list(title = "Sales",
+                     titlecolor = 'rgba(169,169,169,1)',
+                     tickformat = "$,",
+                     showgrid = FALSE,
+                     showline = FALSE,
+                     zeroline = TRUE,
+                     zerolinecolor = 'rgba(169,169,169,1)'),
+        showlegend = FALSE,
+        annotations = list(eshop_ann, dept_ann, groc_ann, cloth_ann, fservice_ann, fservice2020_ann, eshopping2020_ann)
+      )
+    
+    line_chart
+  })
+}
+# Run the Shiny app
+shinyApp(ui = ui, server = server)
+```
+
